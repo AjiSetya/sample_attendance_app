@@ -97,7 +97,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           children: [
             Text('Presensi Anda pada sesi "${widget.session.title}" telah tercatat.'),
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 6,
+              runSpacing: 6,
               children: [
                 const Text('Status Kehadiran: ', style: TextStyle(fontWeight: FontWeight.w500)),
                 AttendanceStatusBadge(status: status),

@@ -236,6 +236,7 @@ class _SessionFormScreenState extends State<SessionFormScreen> {
                 children: [
                   DropdownButtonFormField<String>(
                     initialValue: _status,
+                    isExpanded: true,
                     decoration: InputDecoration(
                       labelText: 'Status Sesi',
                       filled: true,

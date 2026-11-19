@@ -97,14 +97,17 @@ class AttendanceDetailScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(icon, size: 20, color: const Color(0xFF0284C7)),
               const SizedBox(width: 8),
-              Text(
-                title,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               AttendanceStatusBadge(status: status),
             ],
           ),

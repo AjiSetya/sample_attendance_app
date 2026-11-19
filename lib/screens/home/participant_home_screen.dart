@@ -30,27 +30,25 @@ class _ParticipantHomeScreenState extends State<ParticipantHomeScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: pages[_currentIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
-        selectedItemColor: const Color(0xFF0284C7),
-        unselectedItemColor: const Color(0xFF94A3B8),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (index) => setState(() => _currentIndex = index),
         backgroundColor: Colors.white,
         elevation: 8,
-        items: const [
-          BottomNavigationBarItem(
+        destinations: const [
+          NavigationDestination(
             icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
+            selectedIcon: Icon(Icons.home),
             label: 'Beranda',
           ),
-          BottomNavigationBarItem(
+          NavigationDestination(
             icon: Icon(Icons.history_outlined),
-            activeIcon: Icon(Icons.history),
+            selectedIcon: Icon(Icons.history),
             label: 'Riwayat',
           ),
-          BottomNavigationBarItem(
+          NavigationDestination(
             icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
+            selectedIcon: Icon(Icons.person),
             label: 'Profil',
           ),
         ],
