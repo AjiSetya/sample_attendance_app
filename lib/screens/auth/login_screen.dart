@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../services/auth_service.dart';
 import '../../utils/validators.dart';
 import '../../widgets/custom_button.dart';
 import '../../widgets/custom_text_field.dart';
@@ -6,7 +7,7 @@ import '../home/admin_home_screen.dart';
 import '../home/participant_home_screen.dart';
 import 'register_screen.dart';
 
-/// Halaman Login dengan UI modern dan tombol pintasan Demo untuk memudahkan pengujian.
+/// Halaman Login dengan integrasi Firebase Authentication dan tombol pintasan Demo.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -16,8 +17,10 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _authService = AuthService();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+
   bool _obscurePassword = true;
   bool _isLoading = false;
 
@@ -32,16 +35,27 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
-    // Simulasi loading 1 detik pada Fase 2 (data dummy)
-    await Future.delayed(const Duration(seconds: 1));
-    if (!mounted) return;
-    setState(() => _isLoading = false);
 
-    // Default navigasi ke Dashboard Peserta untuk pengujian biasa
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => const ParticipantHomeScreen()),
-    );
+    try {
+      // Autentikasi dengan Firebase Authentication
+      await _authService.signInWithEmailAndPassword(
+        email: _emailController.text,
+        password: _passwordController.text,
+      );
+      // Sukses: AuthWrapper secara otomatis mendeteksi perubahan sesi dan mengarahkan ke dashboard yang sesuai
+    } catch (e) {
+      if (!mounted) return;
+      final errorMessage = AuthService.getFriendlyErrorMessage(e);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: const Color(0xFFEF4444),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -135,7 +149,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Pembatas & Pintasan Demo (Khusus Fase Pembelajaran UI)
+                  // Pembatas & Pintasan Demo (Khusus Mode Pembelajaran)
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -152,7 +166,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             Icon(Icons.science_outlined, size: 16, color: Color(0xFF0369A1)),
                             SizedBox(width: 6),
                             Text(
-                              'Pintasan Pengujian UI (Fase 2)',
+                              'Pintasan Pratinjau Cepat (Tanpa Login)',
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
@@ -167,7 +181,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             Expanded(
                               child: OutlinedButton(
                                 onPressed: () {
-                                  Navigator.pushReplacement(
+                                  Navigator.push(
                                     context,
                                     MaterialPageRoute(builder: (_) => const ParticipantHomeScreen()),
                                   );
@@ -187,7 +201,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             Expanded(
                               child: OutlinedButton(
                                 onPressed: () {
-                                  Navigator.pushReplacement(
+                                  Navigator.push(
                                     context,
                                     MaterialPageRoute(builder: (_) => const AdminHomeScreen()),
                                   );

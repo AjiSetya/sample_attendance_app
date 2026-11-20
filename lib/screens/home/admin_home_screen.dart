@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../models/user_model.dart';
+import '../../services/auth_service.dart';
 import '../../utils/dummy_data.dart';
 import '../../widgets/custom_button.dart';
 import '../../widgets/session_card.dart';
@@ -10,7 +12,9 @@ import '../session/session_monitor_screen.dart';
 
 /// Dashboard Utama untuk Pengguna dengan Peran Admin (Administrator).
 class AdminHomeScreen extends StatefulWidget {
-  const AdminHomeScreen({super.key});
+  final UserModel? user;
+
+  const AdminHomeScreen({super.key, this.user});
 
   @override
   State<AdminHomeScreen> createState() => _AdminHomeScreenState();
@@ -19,36 +23,62 @@ class AdminHomeScreen extends StatefulWidget {
 class _AdminHomeScreenState extends State<AdminHomeScreen> {
   int _currentIndex = 0;
 
+  UserModel _getUser() {
+    if (widget.user != null) return widget.user!;
+    final fbUser = AuthService().currentUser;
+    if (fbUser != null) {
+      return UserModel(
+        uid: fbUser.uid,
+        displayName: fbUser.displayName ?? 'Admin',
+        email: fbUser.email ?? '',
+        role: 'admin',
+      );
+    }
+    final d = DummyData.adminUser;
+    return UserModel(
+      uid: d.uid,
+      displayName: d.displayName,
+      email: d.email,
+      phone: d.phone,
+      role: d.role,
+      createdAt: d.createdAt,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final user = _getUser();
+
     final List<Widget> pages = [
-      _buildAdminHomeContent(),
+      _buildAdminHomeContent(user),
       const SessionListScreen(isAdmin: true),
-      ProfileScreen(user: DummyData.adminUser),
+      ProfileScreen(user: user),
     ];
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: pages[_currentIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (index) => setState(() => _currentIndex = index),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) => setState(() => _currentIndex = index),
+        selectedItemColor: const Color(0xFF7C3AED),
+        unselectedItemColor: const Color(0xFF94A3B8),
         backgroundColor: Colors.white,
         elevation: 8,
-        destinations: const [
-          NavigationDestination(
+        items: const [
+          BottomNavigationBarItem(
             icon: Icon(Icons.dashboard_outlined),
-            selectedIcon: Icon(Icons.dashboard),
+            activeIcon: Icon(Icons.dashboard),
             label: 'Dashboard',
           ),
-          NavigationDestination(
+          BottomNavigationBarItem(
             icon: Icon(Icons.event_note_outlined),
-            selectedIcon: Icon(Icons.event_note),
+            activeIcon: Icon(Icons.event_note),
             label: 'Kelola Sesi',
           ),
-          NavigationDestination(
+          BottomNavigationBarItem(
             icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
+            activeIcon: Icon(Icons.person),
             label: 'Profil Admin',
           ),
         ],
@@ -56,10 +86,12 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 
-  Widget _buildAdminHomeContent() {
-    final user = DummyData.adminUser;
+  Widget _buildAdminHomeContent(UserModel user) {
     final allSessions = DummyData.sessions;
     final activeSessions = allSessions.where((s) => s.status == 'published').toList();
+
+    final displayName = user.displayName.isNotEmpty ? user.displayName : 'Admin';
+    final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'A';
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -75,8 +107,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Panel Admin: ${user.displayName}',
+                        'Panel Admin: $displayName',
                         style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
                       Row(
@@ -93,22 +126,26 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                             ),
                           ),
                           const SizedBox(width: 6),
-                          const Text(
-                            '• Kelola sesi & presensi',
-                            style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
+                          const Flexible(
+                            child: Text(
+                              '• Kelola sesi & presensi',
+                              style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ],
                       ),
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
                 GestureDetector(
                   onTap: () => setState(() => _currentIndex = 2),
                   child: CircleAvatar(
                     radius: 22,
                     backgroundColor: const Color(0xFF7C3AED),
                     child: Text(
-                      user.displayName[0],
+                      initial,
                       style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                     ),
                   ),

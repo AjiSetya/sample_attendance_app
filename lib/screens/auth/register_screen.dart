@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import '../../services/auth_service.dart';
 import '../../utils/validators.dart';
 import '../../widgets/custom_button.dart';
 import '../../widgets/custom_text_field.dart';
-import '../home/participant_home_screen.dart';
 
-/// Halaman Registrasi Akun Baru (Role otomatis Participant sesuai PRD).
+/// Halaman Registrasi Akun Baru (Terintegrasi Firebase Auth & Firestore).
+/// Sesuai PRD, role akun baru secara otomatis 'participant'.
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
 
@@ -14,6 +15,8 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _authService = AuthService();
+
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -42,30 +45,48 @@ class _RegisterScreenState extends State<RegisterScreen> {
         const SnackBar(
           content: Text('Konfirmasi kata sandi tidak cocok'),
           backgroundColor: Color(0xFFEF4444),
+          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
     }
 
     setState(() => _isLoading = true);
-    // Simulasi loading 1 detik pada Fase 2 (data dummy)
-    await Future.delayed(const Duration(seconds: 1));
-    if (!mounted) return;
-    setState(() => _isLoading = false);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Registrasi berhasil! Selamat datang.'),
-        backgroundColor: Color(0xFF15803D),
-      ),
-    );
+    try {
+      // 1. Mendaftarkan akun di Firebase Auth & membuat dokumen profil di Cloud Firestore
+      await _authService.signUpWithEmailAndPassword(
+        name: _nameController.text,
+        email: _emailController.text,
+        password: _passwordController.text,
+        phone: _phoneController.text,
+      );
 
-    // Pengguna baru otomatis masuk ke dashboard peserta
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const ParticipantHomeScreen()),
-      (route) => false,
-    );
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Registrasi berhasil! Selamat datang.'),
+          backgroundColor: Color(0xFF15803D),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      // Kembali ke AuthWrapper di root navigator
+      Navigator.popUntil(context, (route) => route.isFirst);
+    } catch (e) {
+      if (!mounted) return;
+      final errorMessage = AuthService.getFriendlyErrorMessage(e);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: const Color(0xFFEF4444),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override

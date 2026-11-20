@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../models/user_model.dart';
+import '../../services/auth_service.dart';
 import '../../utils/dummy_data.dart';
 import '../../widgets/custom_button.dart';
 import '../../widgets/session_card.dart';
@@ -10,7 +12,9 @@ import '../session/session_list_screen.dart';
 
 /// Dashboard Utama untuk Pengguna dengan Peran Peserta (Participant).
 class ParticipantHomeScreen extends StatefulWidget {
-  const ParticipantHomeScreen({super.key});
+  final UserModel? user;
+
+  const ParticipantHomeScreen({super.key, this.user});
 
   @override
   State<ParticipantHomeScreen> createState() => _ParticipantHomeScreenState();
@@ -19,36 +23,62 @@ class ParticipantHomeScreen extends StatefulWidget {
 class _ParticipantHomeScreenState extends State<ParticipantHomeScreen> {
   int _currentIndex = 0;
 
+  UserModel _getUser() {
+    if (widget.user != null) return widget.user!;
+    final fbUser = AuthService().currentUser;
+    if (fbUser != null) {
+      return UserModel(
+        uid: fbUser.uid,
+        displayName: fbUser.displayName ?? 'Peserta',
+        email: fbUser.email ?? '',
+        role: 'participant',
+      );
+    }
+    final d = DummyData.participantUser;
+    return UserModel(
+      uid: d.uid,
+      displayName: d.displayName,
+      email: d.email,
+      phone: d.phone,
+      role: d.role,
+      createdAt: d.createdAt,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final user = _getUser();
+
     final List<Widget> pages = [
-      _buildHomeContent(),
+      _buildHomeContent(user),
       const HistoryScreen(),
-      ProfileScreen(user: DummyData.participantUser),
+      ProfileScreen(user: user),
     ];
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: pages[_currentIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (index) => setState(() => _currentIndex = index),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) => setState(() => _currentIndex = index),
+        selectedItemColor: const Color(0xFF0284C7),
+        unselectedItemColor: const Color(0xFF94A3B8),
         backgroundColor: Colors.white,
         elevation: 8,
-        destinations: const [
-          NavigationDestination(
+        items: const [
+          BottomNavigationBarItem(
             icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
+            activeIcon: Icon(Icons.home),
             label: 'Beranda',
           ),
-          NavigationDestination(
+          BottomNavigationBarItem(
             icon: Icon(Icons.history_outlined),
-            selectedIcon: Icon(Icons.history),
+            activeIcon: Icon(Icons.history),
             label: 'Riwayat',
           ),
-          NavigationDestination(
+          BottomNavigationBarItem(
             icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
+            activeIcon: Icon(Icons.person),
             label: 'Profil',
           ),
         ],
@@ -56,10 +86,12 @@ class _ParticipantHomeScreenState extends State<ParticipantHomeScreen> {
     );
   }
 
-  Widget _buildHomeContent() {
-    final user = DummyData.participantUser;
+  Widget _buildHomeContent(UserModel user) {
     final publishedSessions = DummyData.sessions.where((s) => s.status == 'published').toList();
     final activeSession = publishedSessions.isNotEmpty ? publishedSessions.first : null;
+
+    final displayName = user.displayName.isNotEmpty ? user.displayName : 'Peserta';
+    final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'P';
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -75,8 +107,9 @@ class _ParticipantHomeScreenState extends State<ParticipantHomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Halo, ${user.displayName} 👋',
+                        'Halo, $displayName 👋',
                         style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
                       Row(
@@ -93,22 +126,26 @@ class _ParticipantHomeScreenState extends State<ParticipantHomeScreen> {
                             ),
                           ),
                           const SizedBox(width: 6),
-                          const Text(
-                            '• Siap presensi hari ini?',
-                            style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
+                          const Flexible(
+                            child: Text(
+                              '• Siap presensi hari ini?',
+                              style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ],
                       ),
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
                 GestureDetector(
                   onTap: () => setState(() => _currentIndex = 2), // Buka tab profil
                   child: CircleAvatar(
                     radius: 22,
                     backgroundColor: const Color(0xFF0284C7),
                     child: Text(
-                      user.displayName[0],
+                      initial,
                       style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                     ),
                   ),
