@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
+import '../../models/attendance_record_model.dart';
+import '../../models/attendance_session_model.dart';
 import '../../models/user_model.dart';
 import '../../services/auth_service.dart';
+import '../../services/firestore_service.dart';
 import '../../utils/dummy_data.dart';
 import '../../widgets/custom_button.dart';
 import '../../widgets/session_card.dart';
-import '../attendance/attendance_screen.dart';
 import '../history/history_screen.dart';
 import '../profile/profile_screen.dart';
 import '../session/session_detail_screen.dart';
 import '../session/session_list_screen.dart';
 
 /// Dashboard Utama untuk Pengguna dengan Peran Peserta (Participant).
+/// Terhubung secara realtime dengan Cloud Firestore.
 class ParticipantHomeScreen extends StatefulWidget {
   final UserModel? user;
 
@@ -21,11 +24,13 @@ class ParticipantHomeScreen extends StatefulWidget {
 }
 
 class _ParticipantHomeScreenState extends State<ParticipantHomeScreen> {
+  final FirestoreService _firestoreService = FirestoreService();
+  final AuthService _authService = AuthService();
   int _currentIndex = 0;
 
   UserModel _getUser() {
     if (widget.user != null) return widget.user!;
-    final fbUser = AuthService().currentUser;
+    final fbUser = _authService.currentUser;
     if (fbUser != null) {
       return UserModel(
         uid: fbUser.uid,
@@ -87,11 +92,9 @@ class _ParticipantHomeScreenState extends State<ParticipantHomeScreen> {
   }
 
   Widget _buildHomeContent(UserModel user) {
-    final publishedSessions = DummyData.sessions.where((s) => s.status == 'published').toList();
-    final activeSession = publishedSessions.isNotEmpty ? publishedSessions.first : null;
-
     final displayName = user.displayName.isNotEmpty ? user.displayName : 'Peserta';
     final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : 'P';
+    final currentUid = user.uid;
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -154,117 +157,173 @@ class _ParticipantHomeScreenState extends State<ParticipantHomeScreen> {
             ),
             const SizedBox(height: 24),
 
-            // Kartu Ringkasan Kehadiran
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF0284C7), Color(0xFF0369A1)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF0284C7).withValues(alpha: 0.3),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Ringkasan Kehadiran Saya',
-                    style: TextStyle(fontSize: 13, color: Colors.white70, fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      _buildSummaryStat('2', 'Total Hadir'),
-                      Container(height: 30, width: 1, color: Colors.white24),
-                      _buildSummaryStat('1', 'Tepat Waktu'),
-                      Container(height: 30, width: 1, color: Colors.white24),
-                      _buildSummaryStat('1', 'Terlambat'),
+            // Kartu Ringkasan Kehadiran Realtime dari Firestore
+            StreamBuilder<List<AttendanceRecordModel>>(
+              stream: _firestoreService.streamParticipantHistory(currentUid),
+              builder: (context, snapshot) {
+                final records = snapshot.data ?? [];
+                final totalHadir = records.where((r) => r.checkInAt != null).length;
+                final onTime = records.where((r) => r.checkInStatus == 'on_time').length;
+                final lateCount = records.where((r) => r.checkInStatus == 'late').length;
+
+                return Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF0284C7), Color(0xFF0369A1)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF0284C7).withValues(alpha: 0.3),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
                     ],
                   ),
-                ],
-              ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Ringkasan Kehadiran Saya',
+                        style: TextStyle(fontSize: 13, color: Colors.white70, fontWeight: FontWeight.w500),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _buildSummaryStat('$totalHadir', 'Total Hadir'),
+                          Container(height: 30, width: 1, color: Colors.white24),
+                          _buildSummaryStat('$onTime', 'Tepat Waktu'),
+                          Container(height: 30, width: 1, color: Colors.white24),
+                          _buildSummaryStat('$lateCount', 'Terlambat'),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 24),
 
-            // Sesi Presensi Aktif Saat Ini
-            if (activeSession != null) ...[
-              const Text(
-                'Sesi Presensi Aktif',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-              ),
-              const SizedBox(height: 10),
-              SessionCard(
-                session: activeSession,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => SessionDetailScreen(session: activeSession),
+            // Sesi Presensi dari Cloud Firestore
+            StreamBuilder<List<AttendanceSessionModel>>(
+              stream: _firestoreService.streamPublishedSessions(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()));
+                }
+
+                final sessions = snapshot.data ?? [];
+
+                if (sessions.isEmpty) {
+                  return Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: const Column(
+                      children: [
+                        Icon(Icons.event_available, size: 48, color: Color(0xFF94A3B8)),
+                        SizedBox(height: 10),
+                        Text(
+                          'Belum Ada Sesi Presensi Aktif',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Admin belum mempublikasikan sesi presensi.',
+                          style: TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                     ),
                   );
-                },
-                trailingAction: Row(
+                }
+
+                // Sesi yang terjadwal untuk hari ini
+                final todaySessions = sessions.where((s) => s.isScheduledForToday()).toList();
+                final activeSession = todaySessions.isNotEmpty ? todaySessions.first : null;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: CustomButton(
-                        text: 'Check-In Sekarang',
-                        icon: Icons.camera_alt_outlined,
-                        height: 40,
-                        onPressed: () {
+                    if (activeSession != null) ...[
+                      const Text(
+                        'Sesi Presensi Hari Ini',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                      ),
+                      const SizedBox(height: 10),
+                      SessionCard(
+                        session: activeSession,
+                        onTap: () {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => AttendanceScreen(session: activeSession, isCheckOut: false),
+                              builder: (_) => SessionDetailScreen(session: activeSession),
                             ),
                           );
                         },
+                        trailingAction: Row(
+                          children: [
+                            Expanded(
+                              child: CustomButton(
+                                text: 'Buka Sesi Presensi',
+                                icon: Icons.camera_alt_outlined,
+                                height: 40,
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => SessionDetailScreen(session: activeSession),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                      const SizedBox(height: 18),
+                    ],
+
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Semua Sesi Presensi',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const SessionListScreen(isAdmin: false)),
+                            );
+                          },
+                          child: const Text('Lihat Semua', style: TextStyle(fontSize: 13, color: Color(0xFF0284C7))),
+                        ),
+                      ],
                     ),
+                    const SizedBox(height: 8),
+
+                    ...sessions.map((s) => SessionCard(
+                          session: s,
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => SessionDetailScreen(session: s)),
+                            );
+                          },
+                        )),
                   ],
-                ),
-              ),
-              const SizedBox(height: 18),
-            ],
-
-            // Sesi Lainnya
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Sesi Kegiatan Lainnya',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-                ),
-                TextButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const SessionListScreen(isAdmin: false)),
-                    );
-                  },
-                  child: const Text('Lihat Semua', style: TextStyle(fontSize: 13, color: Color(0xFF0284C7))),
-                ),
-              ],
+                );
+              },
             ),
-            const SizedBox(height: 8),
-
-            ...publishedSessions.skip(1).map((s) => SessionCard(
-                  session: s,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => SessionDetailScreen(session: s)),
-                    );
-                  },
-                )),
           ],
         ),
       ),

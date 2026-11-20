@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
-import '../../utils/dummy_data.dart';
+import '../../models/attendance_session_model.dart';
+import '../../services/firestore_service.dart';
 import '../../widgets/session_card.dart';
 import 'session_detail_screen.dart';
 import 'session_form_screen.dart';
 
 /// Halaman Daftar Sesi Kegiatan Presensi (Mendukung mode Admin dan Peserta).
+/// Terhubung secara realtime dengan Cloud Firestore.
 class SessionListScreen extends StatefulWidget {
   final bool isAdmin;
 
@@ -15,6 +17,8 @@ class SessionListScreen extends StatefulWidget {
 }
 
 class _SessionListScreenState extends State<SessionListScreen> {
+  final FirestoreService _firestoreService = FirestoreService();
+
   String _selectedFilter = 'Semua';
   String _searchQuery = '';
 
@@ -22,15 +26,10 @@ class _SessionListScreenState extends State<SessionListScreen> {
       ? ['Semua', 'Aktif', 'Draft', 'Selesai']
       : ['Semua', 'Aktif', 'Selesai'];
 
-  List<DummySession> get _filteredSessions {
-    var list = DummyData.sessions;
+  List<AttendanceSessionModel> _filterList(List<AttendanceSessionModel> allSessions) {
+    var list = allSessions;
 
-    // Peserta hanya dapat melihat sesi yang berstatus 'published' atau 'completed'
-    if (!widget.isAdmin) {
-      list = list.where((s) => s.status != 'draft').toList();
-    }
-
-    // Filter status
+    // Filter berdasarkan status
     if (_selectedFilter == 'Aktif') {
       list = list.where((s) => s.status == 'published').toList();
     } else if (_selectedFilter == 'Draft') {
@@ -42,7 +41,12 @@ class _SessionListScreenState extends State<SessionListScreen> {
     // Filter pencarian
     if (_searchQuery.trim().isNotEmpty) {
       final q = _searchQuery.toLowerCase();
-      list = list.where((s) => s.title.toLowerCase().contains(q) || s.location.toLowerCase().contains(q)).toList();
+      list = list
+          .where((s) =>
+              s.title.toLowerCase().contains(q) ||
+              s.location.toLowerCase().contains(q) ||
+              s.description.toLowerCase().contains(q))
+          .toList();
     }
 
     return list;
@@ -50,7 +54,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final sessions = _filteredSessions;
+    final stream = widget.isAdmin
+        ? _firestoreService.streamAllSessions()
+        : _firestoreService.streamPublishedSessions();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -85,7 +91,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
                 TextField(
                   onChanged: (val) => setState(() => _searchQuery = val),
                   decoration: InputDecoration(
-                    hintText: 'Cari sesi atau lokasi...',
+                    hintText: 'Cari judul, lokasi, atau materi...',
                     hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
                     prefixIcon: const Icon(Icons.search, size: 20, color: Color(0xFF64748B)),
                     filled: true,
@@ -117,7 +123,8 @@ class _SessionListScreenState extends State<SessionListScreen> {
                             color: isSelected ? const Color(0xFF0284C7) : const Color(0xFF475569),
                           ),
                           backgroundColor: const Color(0xFFF1F5F9),
-                          side: BorderSide(color: isSelected ? const Color(0xFF0284C7) : Colors.transparent),
+                          side: BorderSide(
+                              color: isSelected ? const Color(0xFF0284C7) : Colors.transparent),
                         ),
                       );
                     }).toList(),
@@ -127,48 +134,78 @@ class _SessionListScreenState extends State<SessionListScreen> {
             ),
           ),
 
-          // Daftar Kartu Sesi
+          // Daftar Sesi dari Cloud Firestore
           Expanded(
-            child: sessions.isEmpty
-                ? Center(
+            child: StreamBuilder<List<AttendanceSessionModel>>(
+              stream: stream,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Text('Terjadi kesalahan memuat sesi: ${snapshot.error}',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Color(0xFFEF4444))),
+                    ),
+                  );
+                }
+
+                final rawList = snapshot.data ?? [];
+                final sessions = _filterList(rawList);
+
+                if (sessions.isEmpty) {
+                  return Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.event_busy, size: 60, color: Colors.grey.shade400),
                         const SizedBox(height: 12),
                         const Text(
-                          'Tidak ada sesi yang ditemukan',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                          'Belum ada sesi presensi',
+                          style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF475569)),
                         ),
                         const SizedBox(height: 4),
-                        const Text(
-                          'Coba ganti filter atau kata kunci pencarian Anda.',
-                          style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                        Text(
+                          widget.isAdmin
+                              ? 'Tekan tombol "+" di atas untuk membuat sesi baru.'
+                              : 'Belum ada sesi yang dipublikasikan saat ini.',
+                          style: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
                         ),
                       ],
                     ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: sessions.length,
-                    itemBuilder: (context, index) {
-                      final session = sessions[index];
-                      return SessionCard(
-                        session: session,
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => SessionDetailScreen(
-                                session: session,
-                                isAdmin: widget.isAdmin,
-                              ),
+                  );
+                }
+
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: sessions.length,
+                  itemBuilder: (context, index) {
+                    final session = sessions[index];
+                    return SessionCard(
+                      session: session,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => SessionDetailScreen(
+                              session: session,
+                              isAdmin: widget.isAdmin,
                             ),
-                          );
-                        },
-                      );
-                    },
-                  ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            ),
           ),
         ],
       ),

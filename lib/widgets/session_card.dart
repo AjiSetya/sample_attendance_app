@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
+import '../models/attendance_session_model.dart';
 import '../utils/date_helper.dart';
-import '../utils/dummy_data.dart';
 import 'attendance_status_badge.dart';
 
-/// Reusable Card untuk menampilkan ringkasan sesi kegiatan presensi.
+/// Reusable Card untuk menampilkan ringkasan sesi kegiatan presensi (Mendukung sesi sekali & rutinan).
 class SessionCard extends StatelessWidget {
-  final DummySession session;
+  final AttendanceSessionModel session;
   final VoidCallback onTap;
   final Widget? trailingAction;
 
@@ -18,6 +18,10 @@ class SessionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final schedule = session.getScheduleForDate(DateTime.now());
+    final startAt = schedule['startAt']!;
+    final endAt = schedule['endAt']!;
+
     return Card(
       elevation: 0.5,
       margin: const EdgeInsets.only(bottom: 12),
@@ -39,15 +43,45 @@ class SessionCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: Text(
-                      session.title,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF0F172A),
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          session.title,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF0F172A),
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (session.isRecurring) ...[
+                          const SizedBox(height: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEDE9FE),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.repeat, size: 12, color: Color(0xFF7C3AED)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Rutinan: ${session.recurringDaysText}',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF7C3AED),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -90,13 +124,19 @@ class SessionCard extends StatelessWidget {
               ),
               const SizedBox(height: 6),
 
-              // Info Waktu Mulai & Selesai
+              // Info Waktu Pelaksanaan
               Row(
                 children: [
-                  const Icon(Icons.access_time_rounded, size: 16, color: Color(0xFF64748B)),
+                  Icon(
+                    session.isRecurring ? Icons.schedule_rounded : Icons.calendar_today_outlined,
+                    size: 15,
+                    color: const Color(0xFF64748B),
+                  ),
                   const SizedBox(width: 6),
                   Text(
-                    '${DateHelper.formatDate(session.startAt)} • ${DateHelper.formatTime(session.startAt)} - ${DateHelper.formatTime(session.endAt)}',
+                    session.isRecurring
+                        ? '${session.recurringDaysText} • ${DateHelper.formatTime(startAt)} - ${DateHelper.formatTime(endAt)}'
+                        : '${DateHelper.formatDate(startAt)} • ${DateHelper.formatTime(startAt)} - ${DateHelper.formatTime(endAt)}',
                     style: const TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w500,

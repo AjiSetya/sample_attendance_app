@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
+import '../../models/attendance_session_model.dart';
+import '../../services/auth_service.dart';
+import '../../services/firestore_service.dart';
 import '../../utils/date_helper.dart';
-import '../../utils/dummy_data.dart';
 import '../../utils/validators.dart';
 import '../../widgets/custom_button.dart';
 import '../../widgets/custom_text_field.dart';
 
 /// Form Pembuatan dan Pengubahan Sesi Presensi oleh Admin.
+/// Mendukung mode jadwal:
+/// 1. Berdasarkan tanggal spesifik (Single Date)
+/// 2. Rutinan (Recurring), contoh: Setiap Senin, atau Setiap Senin - Kamis.
 class SessionFormScreen extends StatefulWidget {
-  final DummySession? session;
+  final AttendanceSessionModel? session;
 
   const SessionFormScreen({super.key, this.session});
 
@@ -17,20 +22,29 @@ class SessionFormScreen extends StatefulWidget {
 
 class _SessionFormScreenState extends State<SessionFormScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _firestoreService = FirestoreService();
+  final _authService = AuthService();
 
   late TextEditingController _titleController;
   late TextEditingController _descController;
   late TextEditingController _locationController;
 
-  late DateTime _startAt;
-  late DateTime _endAt;
-  late DateTime _checkInOpensAt;
-  late DateTime _checkInOnTimeUntil;
-  late DateTime _checkInClosesAt;
-  late DateTime _checkOutOpensAt;
-  late DateTime _checkOutDueAt;
-  late DateTime _checkOutClosesAt;
-  late String _status;
+  late String _scheduleType; // 'single' atau 'recurring'
+  late String _status; // 'published', 'draft', 'completed', 'cancelled'
+
+  // Properti untuk Single Date
+  late DateTime _sessionDate;
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
+  late TimeOfDay _checkInOpens;
+  late TimeOfDay _checkInOnTimeUntil;
+  late TimeOfDay _checkInCloses;
+  late TimeOfDay _checkOutOpens;
+  late TimeOfDay _checkOutDue;
+  late TimeOfDay _checkOutCloses;
+
+  // Properti untuk Rutinan (Recurring): 1=Senin s/d 7=Minggu
+  late List<int> _recurringDays;
 
   bool _isSaving = false;
 
@@ -44,28 +58,58 @@ class _SessionFormScreenState extends State<SessionFormScreen> {
       _titleController = TextEditingController(text: s.title);
       _descController = TextEditingController(text: s.description);
       _locationController = TextEditingController(text: s.location);
-      _startAt = s.startAt;
-      _endAt = s.endAt;
-      _checkInOpensAt = s.checkInOpensAt;
-      _checkInOnTimeUntil = s.checkInOnTimeUntil;
-      _checkInClosesAt = s.checkInClosesAt;
-      _checkOutOpensAt = s.checkOutOpensAt;
-      _checkOutDueAt = s.checkOutDueAt;
-      _checkOutClosesAt = s.checkOutClosesAt;
+      _scheduleType = s.scheduleType;
       _status = s.status;
+
+      _sessionDate = s.startAt;
+      _startTime = s.isRecurring
+          ? (s.recurringStartTime ?? TimeOfDay.fromDateTime(s.startAt))
+          : TimeOfDay.fromDateTime(s.startAt);
+      _endTime = s.isRecurring
+          ? (s.recurringEndTime ?? TimeOfDay.fromDateTime(s.endAt))
+          : TimeOfDay.fromDateTime(s.endAt);
+
+      _checkInOpens = s.isRecurring
+          ? (s.recurringCheckInOpens ?? TimeOfDay.fromDateTime(s.checkInOpensAt))
+          : TimeOfDay.fromDateTime(s.checkInOpensAt);
+      _checkInOnTimeUntil = s.isRecurring
+          ? (s.recurringCheckInOnTimeUntil ?? TimeOfDay.fromDateTime(s.checkInOnTimeUntil))
+          : TimeOfDay.fromDateTime(s.checkInOnTimeUntil);
+      _checkInCloses = s.isRecurring
+          ? (s.recurringCheckInCloses ?? TimeOfDay.fromDateTime(s.checkInClosesAt))
+          : TimeOfDay.fromDateTime(s.checkInClosesAt);
+
+      _checkOutOpens = s.isRecurring
+          ? (s.recurringCheckOutOpens ?? TimeOfDay.fromDateTime(s.checkOutOpensAt))
+          : TimeOfDay.fromDateTime(s.checkOutOpensAt);
+      _checkOutDue = s.isRecurring
+          ? (s.recurringCheckOutDue ?? TimeOfDay.fromDateTime(s.checkOutDueAt))
+          : TimeOfDay.fromDateTime(s.checkOutDueAt);
+      _checkOutCloses = s.isRecurring
+          ? (s.recurringCheckOutCloses ?? TimeOfDay.fromDateTime(s.checkOutClosesAt))
+          : TimeOfDay.fromDateTime(s.checkOutClosesAt);
+
+      _recurringDays = List<int>.from(s.recurringDays);
     } else {
       _titleController = TextEditingController();
       _descController = TextEditingController();
       _locationController = TextEditingController();
-      _startAt = now.add(const Duration(hours: 1));
-      _endAt = now.add(const Duration(hours: 4));
-      _checkInOpensAt = now.add(const Duration(minutes: 30));
-      _checkInOnTimeUntil = now.add(const Duration(hours: 1));
-      _checkInClosesAt = now.add(const Duration(hours: 2));
-      _checkOutOpensAt = now.add(const Duration(hours: 3, minutes: 30));
-      _checkOutDueAt = now.add(const Duration(hours: 4));
-      _checkOutClosesAt = now.add(const Duration(hours: 5));
+      _scheduleType = 'single';
       _status = 'published';
+
+      _sessionDate = now.add(const Duration(hours: 1));
+      _startTime = const TimeOfDay(hour: 8, minute: 0);
+      _endTime = const TimeOfDay(hour: 16, minute: 0);
+
+      _checkInOpens = const TimeOfDay(hour: 7, minute: 0);
+      _checkInOnTimeUntil = const TimeOfDay(hour: 8, minute: 0);
+      _checkInCloses = const TimeOfDay(hour: 9, minute: 0);
+
+      _checkOutOpens = const TimeOfDay(hour: 15, minute: 0);
+      _checkOutDue = const TimeOfDay(hour: 16, minute: 0);
+      _checkOutCloses = const TimeOfDay(hour: 17, minute: 0);
+
+      _recurringDays = [1]; // Default: Hari Senin
     }
   }
 
@@ -77,49 +121,69 @@ class _SessionFormScreenState extends State<SessionFormScreen> {
     super.dispose();
   }
 
-  Future<void> _pickDateTime(String label, DateTime initial, ValueChanged<DateTime> onPicked) async {
-    final pickedDate = await showDatePicker(
+  DateTime _combineDateAndTime(DateTime date, TimeOfDay time) {
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
       context: context,
-      initialDate: initial,
+      initialDate: _sessionDate,
       firstDate: DateTime(2023),
       lastDate: DateTime(2030),
     );
-    if (pickedDate == null || !mounted) return;
+    if (picked != null) {
+      setState(() => _sessionDate = picked);
+    }
+  }
 
-    final pickedTime = await showTimePicker(
+  Future<void> _pickTime(TimeOfDay current, ValueChanged<TimeOfDay> onPicked) async {
+    final picked = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(initial),
+      initialTime: current,
     );
-    if (pickedTime == null || !mounted) return;
-
-    final result = DateTime(
-      pickedDate.year,
-      pickedDate.month,
-      pickedDate.day,
-      pickedTime.hour,
-      pickedTime.minute,
-    );
-    setState(() => onPicked(result));
+    if (picked != null) {
+      setState(() => onPicked(picked));
+    }
   }
 
   void _handleSave() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Validasi urutan waktu yang logis
-    if (_endAt.isBefore(_startAt)) {
+    if (_scheduleType == 'recurring' && _recurringDays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Waktu selesai acara harus setelah waktu mulai'),
+          content: Text('Pilih minimal satu hari untuk jadwal rutinan sesi.'),
           backgroundColor: Color(0xFFEF4444),
         ),
       );
       return;
     }
 
-    if (_checkInClosesAt.isBefore(_checkInOpensAt)) {
+    final startAt = _combineDateAndTime(_sessionDate, _startTime);
+    final endAt = _combineDateAndTime(_sessionDate, _endTime);
+    final checkInOpensAt = _combineDateAndTime(_sessionDate, _checkInOpens);
+    final checkInOnTimeUntil = _combineDateAndTime(_sessionDate, _checkInOnTimeUntil);
+    final checkInClosesAt = _combineDateAndTime(_sessionDate, _checkInCloses);
+    final checkOutOpensAt = _combineDateAndTime(_sessionDate, _checkOutOpens);
+    final checkOutDueAt = _combineDateAndTime(_sessionDate, _checkOutDue);
+    final checkOutClosesAt = _combineDateAndTime(_sessionDate, _checkOutCloses);
+
+    // Validasi urutan waktu
+    if (endAt.isBefore(startAt)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Waktu penutupan check-in harus setelah waktu pembukaan check-in'),
+          content: Text('Jam selesai acara harus setelah jam mulai.'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
+    if (checkInClosesAt.isBefore(checkInOpensAt)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Jam penutupan check-in harus setelah jam pembukaan check-in.'),
           backgroundColor: Color(0xFFEF4444),
         ),
       );
@@ -127,19 +191,67 @@ class _SessionFormScreenState extends State<SessionFormScreen> {
     }
 
     setState(() => _isSaving = true);
-    // Simulasi penyimpanan sesi pada Fase 2 (data dummy)
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (!mounted) return;
-    setState(() => _isSaving = false);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(widget.session != null ? 'Sesi berhasil diperbarui' : 'Sesi baru berhasil dibuat'),
-        backgroundColor: const Color(0xFF15803D),
-      ),
-    );
+    try {
+      final currentUid = _authService.currentUser?.uid ?? 'admin_uid';
 
-    Navigator.pop(context);
+      final sessionModel = AttendanceSessionModel(
+        id: widget.session?.id ?? '',
+        title: _titleController.text.trim(),
+        description: _descController.text.trim(),
+        location: _locationController.text.trim(),
+        scheduleType: _scheduleType,
+        startAt: startAt,
+        endAt: endAt,
+        checkInOpensAt: checkInOpensAt,
+        checkInOnTimeUntil: checkInOnTimeUntil,
+        checkInClosesAt: checkInClosesAt,
+        checkOutOpensAt: checkOutOpensAt,
+        checkOutDueAt: checkOutDueAt,
+        checkOutClosesAt: checkOutClosesAt,
+        recurringDays: _recurringDays,
+        recurringStartTime: _startTime,
+        recurringEndTime: _endTime,
+        recurringCheckInOpens: _checkInOpens,
+        recurringCheckInOnTimeUntil: _checkInOnTimeUntil,
+        recurringCheckInCloses: _checkInCloses,
+        recurringCheckOutOpens: _checkOutOpens,
+        recurringCheckOutDue: _checkOutDue,
+        recurringCheckOutCloses: _checkOutCloses,
+        status: _status,
+        createdBy: widget.session?.createdBy ?? currentUid,
+        createdAt: widget.session?.createdAt ?? DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+
+      if (widget.session != null) {
+        await _firestoreService.updateSession(sessionModel);
+      } else {
+        await _firestoreService.createSession(sessionModel);
+      }
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(widget.session != null
+              ? 'Sesi berhasil diperbarui'
+              : 'Sesi baru berhasil disimpan ke Firestore'),
+          backgroundColor: const Color(0xFF15803D),
+        ),
+      );
+
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Gagal menyimpan sesi: $e'),
+          backgroundColor: const Color(0xFFEF4444),
+        ),
+      );
+    }
   }
 
   @override
@@ -149,7 +261,8 @@ class _SessionFormScreenState extends State<SessionFormScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: Text(isEdit ? 'Ubah Sesi' : 'Buat Sesi Baru', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        title: Text(isEdit ? 'Ubah Sesi Presensi' : 'Buat Sesi Presensi Baru',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
         backgroundColor: Colors.white,
         elevation: 0.5,
         foregroundColor: const Color(0xFF0F172A),
@@ -168,9 +281,10 @@ class _SessionFormScreenState extends State<SessionFormScreen> {
                   CustomTextField(
                     controller: _titleController,
                     label: 'Judul Sesi Kegiatan',
-                    hint: 'Contoh: Workshop Flutter & Firebase',
+                    hint: 'Contoh: Workshop Flutter & Firebase / Kerja Harian',
                     prefixIcon: Icons.title,
-                    validator: (val) => Validators.requiredField(val, fieldName: 'Judul sesi'),
+                    validator: (val) =>
+                        Validators.requiredField(val, fieldName: 'Judul sesi'),
                   ),
                   const SizedBox(height: 14),
                   CustomTextField(
@@ -179,58 +293,201 @@ class _SessionFormScreenState extends State<SessionFormScreen> {
                     hint: 'Jelaskan tujuan dan materi kegiatan...',
                     prefixIcon: Icons.description_outlined,
                     maxLines: 3,
-                    validator: (val) => Validators.requiredField(val, fieldName: 'Deskripsi kegiatan'),
+                    validator: (val) =>
+                        Validators.requiredField(val, fieldName: 'Deskripsi kegiatan'),
                   ),
                   const SizedBox(height: 14),
                   CustomTextField(
                     controller: _locationController,
                     label: 'Lokasi Kegiatan',
-                    hint: 'Contoh: Lab Komputer 3 / Ruang Rapat',
+                    hint: 'Contoh: Lab Komputer 3 / Kantor Utama',
                     prefixIcon: Icons.location_on_outlined,
-                    validator: (val) => Validators.requiredField(val, fieldName: 'Lokasi kegiatan'),
+                    validator: (val) =>
+                        Validators.requiredField(val, fieldName: 'Lokasi kegiatan'),
                   ),
                 ],
               ),
               const SizedBox(height: 16),
 
-              // Waktu Pelaksanaan Acara
+              // PENGATURAN TIPE JADWAL (Single Date vs Rutinan)
               _buildSectionCard(
-                title: 'Jadwal Acara',
+                title: 'Jenis Jadwal Pelaksanaan',
                 children: [
-                  _buildTimePickerTile('Waktu Mulai Acara', _startAt, (val) => _startAt = val),
-                  const Divider(height: 14, color: Color(0xFFF1F5F9)),
-                  _buildTimePickerTile('Waktu Selesai Acara', _endAt, (val) => _endAt = val),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Center(
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(vertical: 4),
+                              child: Text('Sekali / Tanggal Tertentu'),
+                            ),
+                          ),
+                          selected: _scheduleType == 'single',
+                          onSelected: (val) {
+                            if (val) setState(() => _scheduleType = 'single');
+                          },
+                          selectedColor: const Color(0xFFE0F2FE),
+                          labelStyle: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: _scheduleType == 'single'
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: _scheduleType == 'single'
+                                ? const Color(0xFF0284C7)
+                                : const Color(0xFF475569),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Center(
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(vertical: 4),
+                              child: Text('Rutinan / Berulang'),
+                            ),
+                          ),
+                          selected: _scheduleType == 'recurring',
+                          onSelected: (val) {
+                            if (val) setState(() => _scheduleType = 'recurring');
+                          },
+                          selectedColor: const Color(0xFFEDE9FE),
+                          labelStyle: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: _scheduleType == 'recurring'
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: _scheduleType == 'recurring'
+                                ? const Color(0xFF7C3AED)
+                                : const Color(0xFF475569),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  if (_scheduleType == 'single') ...[
+                    // Pemilih Tanggal Acara
+                    InkWell(
+                      onTap: _pickDate,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFCBD5E1)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.calendar_month, color: Color(0xFF0284C7), size: 20),
+                            const SizedBox(width: 10),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Tanggal Pelaksanaan Acara',
+                                    style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                                const SizedBox(height: 2),
+                                Text(
+                                  DateHelper.formatDate(_sessionDate),
+                                  style: const TextStyle(
+                                      fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                                ),
+                              ],
+                            ),
+                            const Spacer(),
+                            const Icon(Icons.arrow_drop_down, color: Color(0xFF64748B)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ] else ...[
+                    // Pengaturan Hari Rutinan
+                    const Text(
+                      'Pilih Hari Rutinan:',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Tombol Preset Cepat
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        ActionChip(
+                          label: const Text('Senin - Kamis', style: TextStyle(fontSize: 11.5)),
+                          onPressed: () => setState(() => _recurringDays = [1, 2, 3, 4]),
+                        ),
+                        ActionChip(
+                          label: const Text('Senin - Jumat', style: TextStyle(fontSize: 11.5)),
+                          onPressed: () => setState(() => _recurringDays = [1, 2, 3, 4, 5]),
+                        ),
+                        ActionChip(
+                          label: const Text('Setiap Hari', style: TextStyle(fontSize: 11.5)),
+                          onPressed: () => setState(() => _recurringDays = [1, 2, 3, 4, 5, 6, 7]),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Pilihan Hari Mandiri (1=Senin s/d 7=Minggu)
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _buildDayToggleChip(1, 'Senin'),
+                        _buildDayToggleChip(2, 'Selasa'),
+                        _buildDayToggleChip(3, 'Rabu'),
+                        _buildDayToggleChip(4, 'Kamis'),
+                        _buildDayToggleChip(5, 'Jumat'),
+                        _buildDayToggleChip(6, 'Sabtu'),
+                        _buildDayToggleChip(7, 'Minggu'),
+                      ],
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: 16),
 
-              // Jadwal Check-In
+              // Pengaturan Jam Acara
               _buildSectionCard(
-                title: 'Jadwal Check-In (Absensi Masuk)',
+                title: 'Waktu Pelaksanaan',
                 children: [
-                  _buildTimePickerTile('Check-In Dibuka', _checkInOpensAt, (val) => _checkInOpensAt = val),
-                  const Divider(height: 14, color: Color(0xFFF1F5F9)),
-                  _buildTimePickerTile('Batas Tepat Waktu', _checkInOnTimeUntil, (val) => _checkInOnTimeUntil = val, isHighlight: true),
-                  const Divider(height: 14, color: Color(0xFFF1F5F9)),
-                  _buildTimePickerTile('Check-In Ditutup', _checkInClosesAt, (val) => _checkInClosesAt = val),
+                  _buildTimePickerRow('Jam Mulai Kegiatan', _startTime, (t) => _startTime = t),
+                  const Divider(height: 16, color: Color(0xFFF1F5F9)),
+                  _buildTimePickerRow('Jam Selesai Kegiatan', _endTime, (t) => _endTime = t),
                 ],
               ),
               const SizedBox(height: 16),
 
-              // Jadwal Check-Out
+              // Rentang Check-In
               _buildSectionCard(
-                title: 'Jadwal Check-Out (Absensi Keluar)',
+                title: 'Rentang Waktu Check-In (Absen Masuk)',
                 children: [
-                  _buildTimePickerTile('Check-Out Dibuka', _checkOutOpensAt, (val) => _checkOutOpensAt = val),
-                  const Divider(height: 14, color: Color(0xFFF1F5F9)),
-                  _buildTimePickerTile('Target Check-Out', _checkOutDueAt, (val) => _checkOutDueAt = val),
-                  const Divider(height: 14, color: Color(0xFFF1F5F9)),
-                  _buildTimePickerTile('Check-Out Ditutup', _checkOutClosesAt, (val) => _checkOutClosesAt = val),
+                  _buildTimePickerRow('Check-In Dibuka', _checkInOpens, (t) => _checkInOpens = t),
+                  const Divider(height: 16, color: Color(0xFFF1F5F9)),
+                  _buildTimePickerRow('Batas Tepat Waktu', _checkInOnTimeUntil, (t) => _checkInOnTimeUntil = t,
+                      isHighlight: true),
+                  const Divider(height: 16, color: Color(0xFFF1F5F9)),
+                  _buildTimePickerRow('Check-In Ditutup', _checkInCloses, (t) => _checkInCloses = t),
                 ],
               ),
               const SizedBox(height: 16),
 
-              // Pengaturan Status Sesi
+              // Rentang Check-Out
+              _buildSectionCard(
+                title: 'Rentang Waktu Check-Out (Absen Keluar)',
+                children: [
+                  _buildTimePickerRow('Check-Out Dibuka', _checkOutOpens, (t) => _checkOutOpens = t),
+                  const Divider(height: 16, color: Color(0xFFF1F5F9)),
+                  _buildTimePickerRow('Target Waktu Check-Out', _checkOutDue, (t) => _checkOutDue = t),
+                  const Divider(height: 16, color: Color(0xFFF1F5F9)),
+                  _buildTimePickerRow('Check-Out Ditutup', _checkOutCloses, (t) => _checkOutCloses = t),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Status Publikasi
               _buildSectionCard(
                 title: 'Status Publikasi',
                 children: [
@@ -245,10 +502,24 @@ class _SessionFormScreenState extends State<SessionFormScreen> {
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                     items: const [
-                      DropdownMenuItem(value: 'published', child: Text('Dipublikasikan (Dapat dilihat peserta)')),
-                      DropdownMenuItem(value: 'draft', child: Text('Draft (Hanya terlihat oleh admin)')),
-                      DropdownMenuItem(value: 'completed', child: Text('Selesai')),
-                      DropdownMenuItem(value: 'cancelled', child: Text('Dibatalkan')),
+                      DropdownMenuItem(
+                        value: 'published',
+                        child: Text('Dipublikasikan (Dapat dilihat peserta)',
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                      DropdownMenuItem(
+                        value: 'draft',
+                        child: Text('Draft (Hanya terlihat oleh admin)',
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                      DropdownMenuItem(
+                        value: 'completed',
+                        child: Text('Selesai'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'cancelled',
+                        child: Text('Dibatalkan'),
+                      ),
                     ],
                     onChanged: (val) {
                       if (val != null) setState(() => _status = val);
@@ -258,7 +529,7 @@ class _SessionFormScreenState extends State<SessionFormScreen> {
               ),
               const SizedBox(height: 24),
 
-              // Tombol Simpan
+              // Tombol Simpan Sesi
               CustomButton(
                 text: isEdit ? 'Simpan Perubahan Sesi' : 'Buat Sesi Sekarang',
                 icon: Icons.save_outlined,
@@ -268,6 +539,30 @@ class _SessionFormScreenState extends State<SessionFormScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildDayToggleChip(int dayIndex, String dayName) {
+    final isSelected = _recurringDays.contains(dayIndex);
+    return FilterChip(
+      label: Text(dayName),
+      selected: isSelected,
+      onSelected: (val) {
+        setState(() {
+          if (val) {
+            _recurringDays.add(dayIndex);
+          } else {
+            _recurringDays.remove(dayIndex);
+          }
+        });
+      },
+      selectedColor: const Color(0xFFEDE9FE),
+      checkmarkColor: const Color(0xFF7C3AED),
+      labelStyle: TextStyle(
+        fontSize: 12,
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        color: isSelected ? const Color(0xFF7C3AED) : const Color(0xFF475569),
       ),
     );
   }
@@ -294,9 +589,13 @@ class _SessionFormScreenState extends State<SessionFormScreen> {
     );
   }
 
-  Widget _buildTimePickerTile(String label, DateTime value, ValueChanged<DateTime> onPicked, {bool isHighlight = false}) {
+  Widget _buildTimePickerRow(String label, TimeOfDay time, ValueChanged<TimeOfDay> onPicked,
+      {bool isHighlight = false}) {
+    final timeStr =
+        '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')} WIB';
+
     return InkWell(
-      onTap: () => _pickDateTime(label, value, onPicked),
+      onTap: () => _pickTime(time, onPicked),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
@@ -319,10 +618,11 @@ class _SessionFormScreenState extends State<SessionFormScreen> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.edit_calendar, size: 14, color: isHighlight ? const Color(0xFFB45309) : const Color(0xFF64748B)),
+                  Icon(Icons.access_time_rounded,
+                      size: 14, color: isHighlight ? const Color(0xFFB45309) : const Color(0xFF64748B)),
                   const SizedBox(width: 6),
                   Text(
-                    DateHelper.formatDateTime(value),
+                    timeStr,
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w600,

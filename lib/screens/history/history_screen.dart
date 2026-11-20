@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import '../../models/attendance_record_model.dart';
+import '../../services/auth_service.dart';
+import '../../services/firestore_service.dart';
 import '../../utils/date_helper.dart';
-import '../../utils/dummy_data.dart';
 import '../../widgets/attendance_status_badge.dart';
 import '../attendance/attendance_detail_screen.dart';
 
 /// Halaman Riwayat Presensi Pribadi untuk Peserta.
+/// Terhubung secara realtime dengan Cloud Firestore.
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
 
@@ -13,21 +16,24 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
+  final FirestoreService _firestoreService = FirestoreService();
+  final AuthService _authService = AuthService();
+
   String _selectedFilter = 'Semua';
   final List<String> _filters = ['Semua', 'Tepat Waktu', 'Terlambat'];
 
-  List<DummyAttendanceRecord> get _filteredRecords {
+  List<AttendanceRecordModel> _filterRecords(List<AttendanceRecordModel> allList) {
     if (_selectedFilter == 'Tepat Waktu') {
-      return DummyData.participantHistory.where((r) => r.checkInStatus == 'on_time').toList();
+      return allList.where((r) => r.checkInStatus == 'on_time').toList();
     } else if (_selectedFilter == 'Terlambat') {
-      return DummyData.participantHistory.where((r) => r.checkInStatus == 'late').toList();
+      return allList.where((r) => r.checkInStatus == 'late').toList();
     }
-    return DummyData.participantHistory;
+    return allList;
   }
 
   @override
   Widget build(BuildContext context) {
-    final records = _filteredRecords;
+    final currentUid = _authService.currentUser?.uid ?? '';
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -72,10 +78,31 @@ class _HistoryScreenState extends State<HistoryScreen> {
             ),
           ),
 
-          // Daftar Riwayat
+          // Daftar Riwayat dari Firestore
           Expanded(
-            child: records.isEmpty
-                ? Center(
+            child: StreamBuilder<List<AttendanceRecordModel>>(
+              stream: _firestoreService.streamParticipantHistory(currentUid),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Text('Gagal memuat riwayat: ${snapshot.error}',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Color(0xFFEF4444))),
+                    ),
+                  );
+                }
+
+                final rawList = snapshot.data ?? [];
+                final records = _filterRecords(rawList);
+
+                if (records.isEmpty) {
+                  return Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -87,111 +114,115 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         ),
                         const SizedBox(height: 4),
                         const Text(
-                          'Belum ada presensi yang sesuai dengan filter yang dipilih.',
+                          'Belum ada presensi yang tercatat untuk akun Anda.',
                           style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
                         ),
                       ],
                     ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: records.length,
-                    itemBuilder: (context, index) {
-                      final item = records[index];
-                      return Card(
-                        elevation: 0.5,
-                        margin: const EdgeInsets.only(bottom: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: const BorderSide(color: Color(0xFFE2E8F0)),
-                        ),
-                        color: Colors.white,
-                        child: InkWell(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => AttendanceDetailScreen(record: item),
-                              ),
-                            );
-                          },
-                          borderRadius: BorderRadius.circular(12),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        item.sessionTitle,
-                                        style: const TextStyle(
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.bold,
-                                          color: Color(0xFF0F172A),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    AttendanceStatusBadge(status: item.checkInStatus),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.login_rounded, size: 15, color: Color(0xFF0284C7)),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      item.checkInAt != null
-                                          ? 'Masuk: ${DateHelper.formatDateTime(item.checkInAt!)}'
-                                          : 'Masuk: -',
-                                      style: const TextStyle(fontSize: 12.5, color: Color(0xFF475569)),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.logout_rounded, size: 15, color: Color(0xFFEA580C)),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      item.checkOutAt != null
-                                          ? 'Keluar: ${DateHelper.formatDateTime(item.checkOutAt!)}'
-                                          : 'Keluar: Belum checkout',
-                                      style: TextStyle(
-                                        fontSize: 12.5,
-                                        color: item.checkOutAt != null
-                                            ? const Color(0xFF475569)
-                                            : const Color(0xFFDC2626),
-                                        fontWeight: item.checkOutAt != null ? FontWeight.normal : FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                const Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      'Lihat Bukti Foto',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFF0284C7),
-                                      ),
-                                    ),
-                                    SizedBox(width: 2),
-                                    Icon(Icons.chevron_right, size: 16, color: Color(0xFF0284C7)),
-                                  ],
-                                ),
-                              ],
+                  );
+                }
+
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: records.length,
+                  itemBuilder: (context, index) {
+                    final item = records[index];
+                    return Card(
+                      elevation: 0.5,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: const BorderSide(color: Color(0xFFE2E8F0)),
+                      ),
+                      color: Colors.white,
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => AttendanceDetailScreen(record: item),
                             ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      item.sessionTitle,
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF0F172A),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  AttendanceStatusBadge(status: item.checkInStatus),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  const Icon(Icons.login_rounded, size: 15, color: Color(0xFF0284C7)),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    item.checkInAt != null
+                                        ? 'Masuk: ${DateHelper.formatDateTime(item.checkInAt!)}'
+                                        : 'Masuk: -',
+                                    style: const TextStyle(fontSize: 12.5, color: Color(0xFF475569)),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  const Icon(Icons.logout_rounded, size: 15, color: Color(0xFFEA580C)),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    item.checkOutAt != null
+                                        ? 'Keluar: ${DateHelper.formatDateTime(item.checkOutAt!)}'
+                                        : 'Keluar: Belum checkout',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      color: item.checkOutAt != null
+                                          ? const Color(0xFF475569)
+                                          : const Color(0xFFDC2626),
+                                      fontWeight: item.checkOutAt != null ? FontWeight.normal : FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              const Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    'Lihat Bukti Foto',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF0284C7),
+                                    ),
+                                  ),
+                                  SizedBox(width: 2),
+                                  Icon(Icons.chevron_right, size: 16, color: Color(0xFF0284C7)),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
-                      );
-                    },
-                  ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
           ),
         ],
       ),
